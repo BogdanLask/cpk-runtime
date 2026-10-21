@@ -309,7 +309,7 @@ static cpk_status list_push(entry_list *l, uint64_t id, uint64_t stored, uint64_
     return CPK_OK;
 }
 
-static int32_t cmp_entry(const void *a, const void *b)
+static int cmp_entry(const void *a, const void *b)
 {
     uint32_t x = ((const cpk_entry *)a)->id, y = ((const cpk_entry *)b)->id;
     return (x > y) - (x < y);
