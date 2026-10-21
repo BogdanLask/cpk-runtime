@@ -20,7 +20,8 @@ typedef enum {
     CPK_IO,
     CPK_NO_MEMORY,
     CPK_BAD_FORMAT,
-    CPK_NO_INDEX
+    CPK_NO_INDEX,
+    CPK_INVALID_ARG
 } cpk_status;
 
 /* A standalone legacy DataH/DataL ITOC stores sizes without offsets. Its
@@ -58,11 +59,11 @@ typedef struct {
     bool id_based;           /* true: ITOC, false: TOC with its ID column */
 } cpk;
 
-/* Zero-initialize before open. Rejects a nonempty/already-open output without
- * releasing it; close before reopening. Failure leaves an empty output empty.
- * Supports TOC plus an optional ID/TocIndex ITOC map, and standalone
- * DataH/DataL ITOC. TOC requires explicit IDs; unsupported UTF versions and
- * variants are rejected.
+/* Clears *archive on entry. Callers must pass an uninitialized or closed
+ * struct, never one that is already open. NULL arguments and an invalid layout
+ * return CPK_INVALID_ARG. Failure leaves an empty output empty. Supports TOC
+ * plus an optional ID/TocIndex ITOC map, and standalone DataH/DataL ITOC. TOC
+ * requires explicit IDs; unsupported UTF versions and variants are rejected.
  * Host budgets: 16 MiB per UTF packet and 262144 entries (not format limits). */
 cpk_status cpk_open_ex(cpk *archive, cpk_read_fn read, void *context, uint64_t file_size,
                        cpk_layout layout);

@@ -527,9 +527,10 @@ cpk_status cpk_open_ex(cpk *archive, cpk_read_fn read, void *context,
     size_t high = 0;
     cpk_status st;
 
-    if(!archive || !read || archive->entries || archive->count || archive->align ||
-       archive->declared_files || archive->high_files || archive->id_based ||
-       (layout!=CPK_LAYOUT_ID_ORDER && layout!=CPK_LAYOUT_TABLE_ORDER)) return CPK_BAD_FORMAT;
+    if(!archive) return CPK_INVALID_ARG;
+    memset(archive, 0, sizeof *archive);
+    if(!read || (layout!=CPK_LAYOUT_ID_ORDER && layout!=CPK_LAYOUT_TABLE_ORDER))
+        return CPK_INVALID_ARG;
 
     st = read_packet(read, context, file_size, 0, "CPK ", file_size, &buf, &bsize);
     if (st != CPK_OK) return st;
@@ -593,6 +594,7 @@ const char *cpk_status_name(cpk_status status)
     case CPK_NO_MEMORY: return "out of memory";
     case CPK_BAD_FORMAT: return "bad or unsupported format";
     case CPK_NO_INDEX: return "no TOC or ITOC in archive";
+    case CPK_INVALID_ARG: return "invalid argument";
     }
     return "unknown";
 }

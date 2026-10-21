@@ -520,7 +520,7 @@ int main(int argc, char **argv)
 {
     FILE *f;
     uint64_t size = 0;
-    cpk cpk = {0};
+    cpk archive = {0};
     cpk_status status;
     int result = 1;
     if (argc == 2 && strcmp(argv[1], "arguments") == 0) return arguments();
@@ -550,7 +550,7 @@ int main(int argc, char **argv)
         fclose(f);
         return result;
     }
-    status = cpk_open_ex(&cpk, read_at, f, size,
+    status = cpk_open_ex(&archive, read_at, f, size,
                          strcmp(argv[1], "table") == 0 ? CPK_LAYOUT_TABLE_ORDER
                                                        : CPK_LAYOUT_ID_ORDER);
     if (status != CPK_OK) {
@@ -559,28 +559,38 @@ int main(int argc, char **argv)
         return 1;
     }
     if (strcmp(argv[1], "index") == 0 || strcmp(argv[1], "table") == 0) {
-        printf("%zu %" PRIu32 " %" PRIu32 "\n", cpk.count, cpk.align, cpk.declared_files);
-        for (size_t i = 0; i < cpk.count; ++i) {
-            const cpk_entry *e = &cpk.entries[i];
+        printf("%zu %" PRIu32 " %" PRIu32 "\n", archive.count, archive.align,
+               archive.declared_files);
+        for (size_t i = 0; i < archive.count; ++i) {
+            const cpk_entry *e = &archive.entries[i];
             printf("%" PRIu32 " %" PRIu32 " %" PRIu64 " %" PRIu32 " %" PRIu32 "\n", e->id,
                    e->table_order, e->offset, e->stored_size, e->extract_size);
         }
         result = 0;
     } else if (strcmp(argv[1], "lifecycle") == 0) {
-        cpk_entry *owned = cpk.entries;
-        result = (cpk_open(&cpk, read_at, f, size) == CPK_BAD_FORMAT && cpk.entries == owned &&
-                  cpk_find(&cpk, UINT32_MAX) == NULL)
-                     ? 0
-                     : 1;
-        cpk_close(&cpk);
-        cpk_close(&cpk);
-        if (cpk_open(&cpk, fail_read, f, size) == CPK_OK || cpk.entries != NULL || cpk.count != 0)
+        cpk garbage;
+        result = 0;
+        memset(&garbage, 0xa5, sizeof garbage);
+        if (cpk_open(&garbage, NULL, f, size) != CPK_INVALID_ARG ||
+            garbage.entries != NULL || garbage.count != 0)
             result = 1;
-        if (cpk_open(&cpk, read_at, f, size) != CPK_OK) result = 1;
+        memset(&garbage, 0xa5, sizeof garbage);
+        if (cpk_open_ex(&garbage, read_at, f, size, (cpk_layout)99) != CPK_INVALID_ARG ||
+            garbage.entries != NULL || garbage.count != 0)
+            result = 1;
+        if (cpk_open(NULL, read_at, f, size) != CPK_INVALID_ARG ||
+            cpk_open_ex(NULL, read_at, f, size, CPK_LAYOUT_ID_ORDER) != CPK_INVALID_ARG)
+            result = 1;
+        cpk_close(&archive);
+        cpk_close(&archive);
+        if (cpk_open(&archive, fail_read, f, size) == CPK_OK || archive.entries != NULL ||
+            archive.count != 0)
+            result = 1;
+        if (cpk_open(&archive, read_at, f, size) != CPK_OK) result = 1;
     } else if (strcmp(argv[1], "extract") == 0 && argc == 4) {
         uint32_t id;
         if (parse_id(argv[3], &id)) {
-            const cpk_entry *e = cpk_find(&cpk, id);
+            const cpk_entry *e = cpk_find(&archive, id);
             if (e != NULL && e->stored_size <= LIMIT && e->extract_size <= LIMIT) {
                 uint8_t *bytes = malloc(e->stored_size != 0 ? e->stored_size : 1);
                 if (bytes != NULL && read_at(f, e->offset, bytes, e->stored_size))
@@ -590,7 +600,7 @@ int main(int argc, char **argv)
             }
         }
     }
-    cpk_close(&cpk);
+    cpk_close(&archive);
     fclose(f);
     return result;
 }
