@@ -59,12 +59,24 @@ typedef struct {
     bool id_based;           /* true: ITOC, false: TOC with its ID column */
 } cpk;
 
+struct cpk_diag;
+
+typedef struct {
+    cpk_layout layout;          /* 0 = CPK_LAYOUT_ID_ORDER */
+    uint16_t utf_max_version;   /* 0 = accept version 0 only */
+    struct cpk_diag *diag;      /* optional; may be NULL */
+} cpk_open_options;
+
 /* Clears *archive on entry. Callers must pass an uninitialized or closed
  * struct, never one that is already open. NULL arguments and an invalid layout
- * return CPK_INVALID_ARG. Failure leaves an empty output empty. Supports TOC
- * plus an optional ID/TocIndex ITOC map, and standalone DataH/DataL ITOC. TOC
- * requires explicit IDs; unsupported UTF versions and variants are rejected.
+ * return CPK_INVALID_ARG. Failure leaves an empty output empty. NULL opts
+ * selects zero-initialized options. Supports TOC plus an optional ID/TocIndex
+ * ITOC map, and standalone DataH/DataL ITOC. TOC requires explicit IDs;
+ * unsupported UTF versions and variants are rejected.
  * Host budgets: 16 MiB per UTF packet and 262144 entries (not format limits). */
+cpk_status cpk_open_opts(cpk *archive, cpk_read_fn read, void *context,
+                         uint64_t file_size, const cpk_open_options *opts);
+/* Same, with explicit layout and zero-initialized options. */
 cpk_status cpk_open_ex(cpk *archive, cpk_read_fn read, void *context, uint64_t file_size,
                        cpk_layout layout);
 /* Same, with CPK_LAYOUT_ID_ORDER. */

@@ -7,6 +7,13 @@
 #define MAX_ENTRIES ((size_t)262144)
 #define UTF_NO_NAME UINT32_MAX
 
+typedef struct {
+    cpk_read_fn read;
+    void *ctx;
+    uint64_t file_size;
+    cpk_open_options opts;
+} open_state;
+
 /* @UTF column flag bits. Low nibble is the value type. */
 enum { COL_NAME = 0x10, COL_CONST = 0x20, COL_ROW = 0x40, COL_BAD = 0x80 };
 enum {
@@ -88,7 +95,7 @@ static void utf_close(utf_table *t)
 }
 
 /* buf must be writable; size is the number of valid bytes at buf. */
-static cpk_status utf_open(utf_table *t, uint8_t *buf, size_t size)
+static cpk_status utf_open(open_state *s, utf_table *t, uint8_t *buf, size_t size)
 {
     memset(t, 0, sizeof *t);
     if (!buf || size < 32) return CPK_BAD_FORMAT;
@@ -97,7 +104,7 @@ static cpk_status utf_open(utf_table *t, uint8_t *buf, size_t size)
         if (memcmp(buf, "@UTF", 4) != 0) return CPK_BAD_FORMAT;
     }
 
-    if(be16(buf+8)!=0) return CPK_BAD_FORMAT;
+    if(be16(buf+8)>s->opts.utf_max_version) return CPK_BAD_FORMAT;
     uint64_t total = (uint64_t)be32(buf + 4) + 8;
     if (total < 32 || total > size) return CPK_BAD_FORMAT;
     size = (size_t)total;
@@ -249,15 +256,14 @@ static bool utf_number(const utf_table *t,const char *name,uint64_t fallback,boo
 /* A packet is: 4-byte tag, 12 more header bytes, then one @UTF table. The
  * table length comes from the @UTF header itself, not from the packet header,
  * so only the first 8 table bytes are inspected (and decrypted, if needed). */
-static cpk_status read_packet(cpk_read_fn read, void *ctx, uint64_t file_size,
-                                 uint64_t offset, const char *tag, uint64_t packet_extent,
-                                 uint8_t **out, size_t *out_size)
+static cpk_status read_packet(open_state *s, uint64_t offset, const char *tag,
+                                 uint64_t packet_extent, uint8_t **out, size_t *out_size)
 {
     uint8_t head[24];
     *out = NULL;
     *out_size = 0;
-    if(packet_extent<sizeof head || !range_ok(file_size,offset,packet_extent) || !range_ok(file_size, offset, sizeof head)) return CPK_BAD_FORMAT;
-    if (!read(ctx, offset, head, sizeof head)) return CPK_IO;
+    if(packet_extent<sizeof head || !range_ok(s->file_size,offset,packet_extent) || !range_ok(s->file_size, offset, sizeof head)) return CPK_BAD_FORMAT;
+    if (!s->read(s->ctx, offset, head, sizeof head)) return CPK_IO;
     if (memcmp(head, tag, 4) != 0) return CPK_BAD_FORMAT;
 
     uint8_t *pre = head + 16;
@@ -265,14 +271,14 @@ static cpk_status read_packet(cpk_read_fn read, void *ctx, uint64_t file_size,
     if (memcmp(pre, "@UTF", 4) != 0) return CPK_BAD_FORMAT;
 
     uint64_t total = (uint64_t)be32(pre + 4) + 8;
-    if (total < 32 || total > MAX_TABLE_BYTES || !range_ok(file_size, offset + 16, total))
+    if (total < 32 || total > MAX_TABLE_BYTES || !range_ok(s->file_size, offset + 16, total))
         return CPK_BAD_FORMAT;
 
     uint64_t packet_size=le64(head+8);
-    if(packet_size<total || packet_size>packet_extent-16u || packet_size>MAX_TABLE_BYTES || !range_ok(file_size,offset+16,packet_size)) return CPK_BAD_FORMAT;
+    if(packet_size<total || packet_size>packet_extent-16u || packet_size>MAX_TABLE_BYTES || !range_ok(s->file_size,offset+16,packet_size)) return CPK_BAD_FORMAT;
     uint8_t *buf = malloc((size_t)total);
     if (!buf) return CPK_NO_MEMORY;
-    if (!read(ctx, offset + 16, buf, (size_t)total)) {
+    if (!s->read(s->ctx, offset + 16, buf, (size_t)total)) {
         free(buf);
         return CPK_IO;
     }
@@ -325,7 +331,7 @@ static cpk_status sort_unique(entry_list *l)
 
 /* ---- ITOC (ID based, offsets implicit) ---- */
 
-static cpk_status load_itoc_part(const utf_table *t, const char *name, entry_list *l)
+static cpk_status load_itoc_part(open_state *s, const utf_table *t, const char *name, entry_list *l)
 {
     const utf_col *c = utf_find_col(t, name);
     uint8_t *blob;
@@ -335,7 +341,7 @@ static cpk_status load_itoc_part(const utf_table *t, const char *name, entry_lis
     if (blen == 0) return CPK_OK;
 
     utf_table sub;
-    cpk_status st = utf_open(&sub, blob, blen);
+    cpk_status st = utf_open(s, &sub, blob, blen);
     if (st != CPK_OK) return st;
 
     const utf_col *id = utf_find_col(&sub, "ID");
@@ -361,22 +367,22 @@ static cpk_status load_itoc_part(const utf_table *t, const char *name, entry_lis
 
 /* Rows are appended DataH first, then DataL, matching the index order.
  * *high receives the number of DataH rows. */
-static cpk_status load_itoc(cpk_read_fn read, void *ctx, uint64_t file_size,
-                               uint64_t offset, uint64_t extent, entry_list *l, size_t *high)
+static cpk_status load_itoc(open_state *s, uint64_t offset, uint64_t extent,
+                               entry_list *l, size_t *high)
 {
     static const char *const parts[2] = {"DataH", "DataL"};
     uint8_t *buf;
     size_t bsize;
     utf_table t;
-    cpk_status st = read_packet(read, ctx, file_size, offset, "ITOC", extent, &buf, &bsize);
+    cpk_status st = read_packet(s, offset, "ITOC", extent, &buf, &bsize);
     if (st != CPK_OK) return st;
-    st = utf_open(&t, buf, bsize);
+    st = utf_open(s, &t, buf, bsize);
     if (st != CPK_OK) {
         free(buf);
         return st;
     }
     for (uint32_t k = 0; k < 2 && st == CPK_OK; k++) {
-        st = load_itoc_part(&t, parts[k], l);
+        st = load_itoc_part(s, &t, parts[k], l);
         if (k == 0) *high = l->n;
     }
     utf_close(&t);
@@ -386,13 +392,13 @@ static cpk_status load_itoc(cpk_read_fn read, void *ctx, uint64_t file_size,
 
 /* Files are stored back to back in the list's current order, each padded up to
  * Align; the first one starts at ContentOffset rounded up to Align. */
-static cpk_status layout_itoc(entry_list *l, uint64_t content, uint64_t align, uint64_t file_size)
+static cpk_status layout_itoc(open_state *s, entry_list *l, uint64_t content, uint64_t align)
 {
-    if (content > file_size) return CPK_BAD_FORMAT;
+    if (content > s->file_size) return CPK_BAD_FORMAT;
     uint64_t pos=0;if(!align_up(content,align,&pos)) return CPK_BAD_FORMAT;
     for (size_t i = 0; i < l->n; i++) {
         cpk_entry *e = &l->v[i];
-        if (!range_ok(file_size, pos, e->stored_size)) return CPK_BAD_FORMAT;
+        if (!range_ok(s->file_size, pos, e->stored_size)) return CPK_BAD_FORMAT;
         e->offset = pos;
         if(i+1<l->n) {
             uint64_t step=0;
@@ -405,15 +411,15 @@ static cpk_status layout_itoc(entry_list *l, uint64_t content, uint64_t align, u
 
 /* ---- TOC (name based; ID column required) ---- */
 
-static cpk_status load_toc(cpk_read_fn read, void *ctx, uint64_t file_size,
-                              uint64_t offset, uint64_t extent, uint64_t content, entry_list *l)
+static cpk_status load_toc(open_state *s, uint64_t offset, uint64_t extent, uint64_t content,
+                              entry_list *l)
 {
     uint8_t *buf;
     size_t bsize;
     utf_table t;
-    cpk_status st = read_packet(read, ctx, file_size, offset, "TOC ", extent, &buf, &bsize);
+    cpk_status st = read_packet(s, offset, "TOC ", extent, &buf, &bsize);
     if (st != CPK_OK) return st;
-    st = utf_open(&t, buf, bsize);
+    st = utf_open(s, &t, buf, bsize);
     if (st != CPK_OK) {
         free(buf);
         return st;
@@ -443,7 +449,7 @@ static cpk_status load_toc(cpk_read_fn read, void *ctx, uint64_t file_size,
         if (st != CPK_OK) break;
         cpk_entry *e = &l->v[l->n - 1];
         e->offset = base + voff;
-        if (!range_ok(file_size, e->offset, e->stored_size)) st = CPK_BAD_FORMAT;
+        if (!range_ok(s->file_size, e->offset, e->stored_size)) st = CPK_BAD_FORMAT;
     }
     utf_close(&t);
     free(buf);
@@ -452,12 +458,12 @@ static cpk_status load_toc(cpk_read_fn read, void *ctx, uint64_t file_size,
 
 /* Observed extended ITOC maps IDs to TOC rows; it does not supply sizes.
  * Entries are already ID-sorted, with original TOC row in table_order. */
-static cpk_status validate_map(cpk_read_fn read,void *ctx,uint64_t file_size,uint64_t offset,uint64_t extent,const entry_list *list)
+static cpk_status validate_map(open_state *s,uint64_t offset,uint64_t extent,const entry_list *list)
 {
     uint8_t *buf=NULL;size_t size=0;utf_table table={0};
-    cpk_status status=read_packet(read,ctx,file_size,offset,"ITOC",extent,&buf,&size);
+    cpk_status status=read_packet(s,offset,"ITOC",extent,&buf,&size);
     if(status!=CPK_OK) return status;
-    status=utf_open(&table,buf,size);
+    status=utf_open(s,&table,buf,size);
     if(status!=CPK_OK) {free(buf);return status;}
     const utf_col *id=utf_find_col(&table,"ID"),*index=utf_find_col(&table,"TocIndex");
     if(!id || !index || table.nrows!=list->n) status=CPK_BAD_FORMAT;
@@ -478,9 +484,9 @@ static cpk_status validate_map(cpk_read_fn read,void *ctx,uint64_t file_size,uin
 
 /* ---- public API ---- */
 
-static cpk_status build_index(const utf_table *hdr, cpk_read_fn read, void *ctx,
-                                 uint64_t file_size, cpk_layout layout, entry_list *l,
-                                 bool *id_based, uint64_t *align_out, size_t *high)
+static cpk_status build_index(open_state *s, const utf_table *hdr,
+                                 entry_list *l, bool *id_based,
+                                 uint64_t *align_out, size_t *high)
 {
     uint64_t content=0,toc_off=0,toc_size=0,itoc_off=0,itoc_size=0,align=0;
     cpk_status st;
@@ -489,34 +495,34 @@ static cpk_status build_index(const utf_table *hdr, cpk_read_fn read, void *ctx,
        !utf_number(hdr,"ItocOffset",0,false,&itoc_off) || !utf_number(hdr,"ItocSize",0,false,&itoc_size)) return CPK_BAD_FORMAT;
     if(toc_off==UINT64_MAX) toc_off=0;
     if(itoc_off==UINT64_MAX) itoc_off=0;
-    if(!align || align>UINT32_MAX || content>file_size ||
-       (toc_off && (!toc_size || !range_ok(file_size,toc_off,toc_size))) ||
-       (itoc_off && (!itoc_size || !range_ok(file_size,itoc_off,itoc_size)))) return CPK_BAD_FORMAT;
+    if(!align || align>UINT32_MAX || content>s->file_size ||
+       (toc_off && (!toc_size || !range_ok(s->file_size,toc_off,toc_size))) ||
+       (itoc_off && (!itoc_size || !range_ok(s->file_size,itoc_off,itoc_size)))) return CPK_BAD_FORMAT;
     *align_out=align;
     if(toc_off) {
-        *id_based=false;st=load_toc(read,ctx,file_size,toc_off,toc_size,content,l);
+        *id_based=false;st=load_toc(s,toc_off,toc_size,content,l);
         if(st==CPK_OK) st=sort_unique(l);
-        if(st==CPK_OK && itoc_off) st=validate_map(read,ctx,file_size,itoc_off,itoc_size,l);
+        if(st==CPK_OK && itoc_off) st=validate_map(s,itoc_off,itoc_size,l);
         return st;
     }
     if (itoc_off && itoc_size) {
         *id_based = true;
-        st = load_itoc(read, ctx, file_size, itoc_off, itoc_size, l, high);
+        st = load_itoc(s, itoc_off, itoc_size, l, high);
         if (st != CPK_OK) return st;
-        if (layout == CPK_LAYOUT_TABLE_ORDER) {
-            st = layout_itoc(l, content, align, file_size);
+        if (s->opts.layout == CPK_LAYOUT_TABLE_ORDER) {
+            st = layout_itoc(s, l, content, align);
             if (st == CPK_OK) st = sort_unique(l);
         } else {
             st = sort_unique(l);
-            if (st == CPK_OK) st = layout_itoc(l, content, align, file_size);
+            if (st == CPK_OK) st = layout_itoc(s, l, content, align);
         }
         return st;
     }
     return CPK_NO_INDEX;
 }
 
-cpk_status cpk_open_ex(cpk *archive, cpk_read_fn read, void *context,
-                             uint64_t file_size, cpk_layout layout)
+cpk_status cpk_open_opts(cpk *archive, cpk_read_fn read, void *context,
+                              uint64_t file_size, const cpk_open_options *opts)
 {
     uint8_t *buf;
     size_t bsize;
@@ -526,22 +532,31 @@ cpk_status cpk_open_ex(cpk *archive, cpk_read_fn read, void *context,
     uint64_t align = 0;
     size_t high = 0;
     cpk_status st;
+    cpk_open_options options = {0};
+    open_state state = {0};
 
     if(!archive) return CPK_INVALID_ARG;
     memset(archive, 0, sizeof *archive);
-    if(!read || (layout!=CPK_LAYOUT_ID_ORDER && layout!=CPK_LAYOUT_TABLE_ORDER))
+    if(opts) options = *opts;
+    if(!read || (options.layout!=CPK_LAYOUT_ID_ORDER &&
+                 options.layout!=CPK_LAYOUT_TABLE_ORDER))
         return CPK_INVALID_ARG;
 
-    st = read_packet(read, context, file_size, 0, "CPK ", file_size, &buf, &bsize);
+    state.read = read;
+    state.ctx = context;
+    state.file_size = file_size;
+    state.opts = options;
+
+    st = read_packet(&state, 0, "CPK ", file_size, &buf, &bsize);
     if (st != CPK_OK) return st;
-    st = utf_open(&hdr, buf, bsize);
+    st = utf_open(&state, &hdr, buf, bsize);
     if (st != CPK_OK) {
         free(buf);
         return st;
     }
 
     if (hdr.nrows != 1) st = CPK_BAD_FORMAT;
-    else st = build_index(&hdr, read, context, file_size, layout, &list, &id_based, &align, &high);
+    else st = build_index(&state, &hdr, &list, &id_based, &align, &high);
 
     uint64_t declared=0;
     if(st==CPK_OK && (!utf_number(&hdr,"Files",0,true,&declared) || declared!=list.n)) st=CPK_BAD_FORMAT;
@@ -558,6 +573,14 @@ cpk_status cpk_open_ex(cpk *archive, cpk_read_fn read, void *context,
     utf_close(&hdr);
     free(buf);
     return st;
+}
+
+cpk_status cpk_open_ex(cpk *archive, cpk_read_fn read, void *context,
+                       uint64_t file_size, cpk_layout layout)
+{
+    cpk_open_options options = {0};
+    options.layout = layout;
+    return cpk_open_opts(archive, read, context, file_size, &options);
 }
 
 cpk_status cpk_open(cpk *archive, cpk_read_fn read, void *context, uint64_t file_size)
