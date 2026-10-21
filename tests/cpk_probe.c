@@ -208,8 +208,8 @@ static int provider_contracts(FILE *f, uint64_t size)
     fake_source source = {f, false, 0}, model = {f, false, 77};
     cpk_assets *assets = NULL;
     cpk_archive_source sources[2] = {
-        {1, fake_read, &source, size, fake_error, CPK_LAYOUT_ID_ORDER, 0, 0},
-        {2, fake_read, &model, size, fake_error, CPK_LAYOUT_ID_ORDER, 0, 0},
+        {1, fake_read, &source, size, fake_error, CPK_LAYOUT_ID_ORDER, 0, 0, 0, NULL},
+        {2, fake_read, &model, size, fake_error, CPK_LAYOUT_ID_ORDER, 0, 0, 0, NULL},
     };
     if (cpk_assets_open(&assets, sources, 2).status != CPK_ASSET_OK) return 1;
     if (cpk_assets_open(&assets, sources, 2).status != CPK_ASSET_INVALID) return 1;
@@ -360,7 +360,7 @@ static int file_provider(const char *path, const char *identity)
     }
 
     cpk_archive_source source = {1, cpk_file_read, file, size, cpk_file_error,
-                                 CPK_LAYOUT_ID_ORDER, 0, 0};
+                                 CPK_LAYOUT_ID_ORDER, 0, 0, 0, NULL};
     cpk_assets *assets = NULL;
     result = cpk_assets_open(&assets, &source, 1);
     if (result.status != CPK_ASSET_OK) {
@@ -430,7 +430,7 @@ static int file_provider_into(const char *path, const char *identity)
     }
 
     cpk_archive_source source = {1, counted_read, &counted, file_size, NULL,
-                                 CPK_LAYOUT_ID_ORDER, 0, 0};
+                                 CPK_LAYOUT_ID_ORDER, 0, 0, 0, NULL};
     cpk_assets *assets = NULL;
     result = cpk_assets_open(&assets, &source, 1);
     if (result.status != CPK_ASSET_OK) {

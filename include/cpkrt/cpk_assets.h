@@ -19,6 +19,8 @@ typedef struct {
     cpk_layout layout;
     uint32_t max_stored_size;  /* 0 selects CPK_DEFAULT_ENTRY_CAP */
     uint32_t max_extract_size; /* 0 selects CPK_DEFAULT_ENTRY_CAP */
+    uint16_t utf_max_version;  /* 0 accepts @UTF version 0 only */
+    cpk_diag *diag;            /* optional; receives the first open failure */
 } cpk_archive_source;
 
 /* Optional allocation hooks for the provider's own structures and read

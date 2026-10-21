@@ -107,9 +107,14 @@ cpk_asset_result cpk_assets_open_ex(cpk_assets **output, const cpk_archive_sourc
 
     for (size_t i = 0; i < count; i++) {
         assets->archives[i].source = sources[i];
-        cpk_status status = cpk_open_ex(&assets->archives[i].index, sources[i].read,
-                                        sources[i].context, sources[i].file_size,
-                                        sources[i].layout);
+        cpk_open_options options = {
+            .layout = sources[i].layout,
+            .utf_max_version = sources[i].utf_max_version,
+            .diag = sources[i].diag,
+        };
+        cpk_status status = cpk_open_opts(&assets->archives[i].index, sources[i].read,
+                                          sources[i].context, sources[i].file_size,
+                                          &options);
         if (status != CPK_OK) {
             cpk_asset_result result =
                 error(index_status(status), status == CPK_IO ? &sources[i] : NULL);

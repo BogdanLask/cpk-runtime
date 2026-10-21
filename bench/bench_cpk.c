@@ -346,6 +346,8 @@ static bool bench_provider(const char *name, const memory_file *file,
         CPK_LAYOUT_ID_ORDER,
         entry->stored_size,
         entry->extract_size,
+        0,
+        NULL,
     };
     cpk_assets *assets = NULL;
     cpk_asset_result result = cpk_assets_open(&assets, &source, 1);
@@ -405,6 +407,8 @@ static bool bench_provider_into(const char *name, const memory_file *file,
         CPK_LAYOUT_ID_ORDER,
         entry->stored_size,
         entry->extract_size,
+        0,
+        NULL,
     };
     cpk_assets *assets = NULL;
     cpk_asset_result result = cpk_assets_open(&assets, &source, 1);
@@ -591,6 +595,8 @@ static bool bench_file_provider(const char *name, const char *path,
         CPK_LAYOUT_ID_ORDER,
         entry->stored_size,
         entry->extract_size,
+        0,
+        NULL,
     };
     result = cpk_assets_open(&assets, &source, 1);
     if (result.status != CPK_ASSET_OK) {
@@ -669,6 +675,8 @@ static bool bench_file_provider_into(const char *name, const char *path,
         CPK_LAYOUT_ID_ORDER,
         entry->stored_size,
         entry->extract_size,
+        0,
+        NULL,
     };
     result = cpk_assets_open(&assets, &source, 1);
     if (result.status != CPK_ASSET_OK) {

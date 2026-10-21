@@ -24,6 +24,7 @@ static int dump_entry(const char *path, uint32_t id)
         return 1;
     }
 
+    cpk_diag diag = {0};
     cpk_archive_source source = {
         .archive = 1,              /* any caller-chosen archive identifier */
         .read = cpk_file_read,
@@ -32,12 +33,16 @@ static int dump_entry(const char *path, uint32_t id)
         .last_error = cpk_file_error,
         .layout = CPK_LAYOUT_ID_ORDER,
         /* max_stored_size / max_extract_size: 0 selects the 64 MiB default */
+        .diag = &diag,
     };
 
     cpk_assets *assets = NULL;
     result = cpk_assets_open(&assets, &source, 1);
     if (result.status != CPK_ASSET_OK) {
-        fprintf(stderr, "cpk_assets_open: status %u\n", (unsigned int)result.status);
+        char text[256];
+        cpk_diag_format(&diag, text, sizeof text);
+        fprintf(stderr, "cpk_assets_open: status %u; %s\n",
+                (unsigned int)result.status, text);
         cpk_file_close(file);
         return 1;
     }

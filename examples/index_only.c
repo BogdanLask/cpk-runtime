@@ -28,9 +28,13 @@ static int dump_entry(const char *path, uint32_t id)
     }
 
     cpk archive = {0};
-    cpk_status status = cpk_open(&archive, cpk_file_read, file, file_size);
+    cpk_diag diag = {0};
+    cpk_open_options options = {.layout = CPK_LAYOUT_ID_ORDER, .diag = &diag};
+    cpk_status status = cpk_open_opts(&archive, cpk_file_read, file, file_size, &options);
     if (status != CPK_OK) {
-        fprintf(stderr, "cpk_open: %s\n", cpk_status_name(status));
+        char text[256];
+        cpk_diag_format(&diag, text, sizeof text);
+        fprintf(stderr, "cpk_open: %s; %s\n", cpk_status_name(status), text);
         cpk_file_close(file);
         return 1;
     }

@@ -59,18 +59,54 @@ typedef struct {
     bool id_based;           /* true: ITOC, false: TOC with its ID column */
 } cpk;
 
-struct cpk_diag;
+/* First-failure diagnostics. A reason of CPK_REASON_NONE means no failure was
+ * recorded. String fields point to literals and never require freeing. */
+enum {
+    CPK_REASON_NONE = 0,
+    CPK_REASON_UTF_MAGIC,
+    CPK_REASON_UTF_VERSION,
+    CPK_REASON_UTF_LAYOUT,
+    CPK_REASON_TABLE_NAME,
+    CPK_REASON_COLUMN_FLAGS,
+    CPK_REASON_COLUMN_TYPE,
+    CPK_REASON_COLUMN_NAME,
+    CPK_REASON_ROW_LENGTH,
+    CPK_REASON_ROW_COUNT,
+    CPK_REASON_PACKET_TAG,
+    CPK_REASON_PACKET_SIZE,
+    CPK_REASON_MISSING_HEADER_COLUMN,
+    CPK_REASON_MISSING_TOC_COLUMN,
+    CPK_REASON_INTEGER,
+    CPK_REASON_ENTRY_RANGE,
+    CPK_REASON_DUPLICATE_ID,
+    CPK_REASON_MAP_MISMATCH,
+    CPK_REASON_FILES_MISMATCH,
+    CPK_REASON_LIMIT,
+    CPK_REASON_HEADER_VALUE,
+    CPK_REASON_IO
+};
+
+typedef struct cpk_diag {
+    int reason;        /* CPK_REASON_* */
+    const char *table; /* "CPK ", "TOC ", "ITOC", "DataH", "DataL", or NULL */
+    const char *column; /* literal column name, or NULL */
+    uint64_t index;    /* row or column index where relevant */
+    uint64_t offset;   /* file offset of the table/packet, when known */
+    uint64_t value;    /* observed value */
+    uint64_t expected; /* limit or expected value, when relevant */
+} cpk_diag;
 
 typedef struct {
     cpk_layout layout;          /* 0 = CPK_LAYOUT_ID_ORDER */
     uint16_t utf_max_version;   /* 0 = accept version 0 only */
-    struct cpk_diag *diag;      /* optional; may be NULL */
+    cpk_diag *diag;             /* optional; may be NULL */
 } cpk_open_options;
 
 /* Clears *archive on entry. Callers must pass an uninitialized or closed
  * struct, never one that is already open. NULL arguments and an invalid layout
  * return CPK_INVALID_ARG. Failure leaves an empty output empty. NULL opts
- * selects zero-initialized options. Supports TOC plus an optional ID/TocIndex
+ * selects zero-initialized options. If opts->diag is non-NULL it is cleared and
+ * receives the first failure only. Supports TOC plus an optional ID/TocIndex
  * ITOC map, and standalone DataH/DataL ITOC. TOC requires explicit IDs;
  * unsupported UTF versions and variants are rejected.
  * Host budgets: 16 MiB per UTF packet and 262144 entries (not format limits). */
@@ -93,4 +129,12 @@ static inline bool cpk_entry_compressed(const cpk_entry *entry)
 
 /* Human-readable status, or "unknown" for an out-of-range value. */
 const char *cpk_status_name(cpk_status status);
+
+/* Human-readable reason code, or "unknown" for an out-of-range value. */
+const char *cpk_reason_name(int reason);
+
+/* Formats a diagnostic as one line. Behaves like snprintf: returns the length
+ * the full text needs (excluding the NUL), and NUL-terminates when n > 0.
+ * buf may be NULL only when n == 0. Returns 0 for NULL d. */
+size_t cpk_diag_format(const cpk_diag *d, char *buf, size_t n);
 #endif
