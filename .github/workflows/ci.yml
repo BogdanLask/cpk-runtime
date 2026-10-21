@@ -1,0 +1,80 @@
+# SPDX-License-Identifier: MIT
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux ${{ matrix.compiler }} (ASan/UBSan)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_C_COMPILER=${{ matrix.compiler }}
+          -DCPKRT_SANITIZE=ON
+          -DCPKRT_BUILD_BENCHMARKS=ON
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Benchmark smoke
+        run: |
+          python3 bench/make_bench_fixture.py build/bench.cpk --entries 64 --packed-count 1 --raw-size 4096 --packed-size 16384
+          ./build/cpkrt_bench build/bench.cpk --index-iters 2 --lookup-iters 1000 --read-iters 2 --decode-iters 2
+
+  fuzz-linux:
+    name: Linux Clang fuzz smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: >
+          cmake -S . -B build-fuzz
+          -DCMAKE_C_COMPILER=clang
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCPKRT_BUILD_TESTS=OFF
+          -DCPKRT_BUILD_BENCHMARKS=OFF
+          -DCPKRT_BUILD_EXAMPLES=OFF
+          -DCPKRT_BUILD_FUZZERS=ON
+          -DCPKRT_FUZZ_SECONDS=20
+      - name: Build
+        run: cmake --build build-fuzz --parallel
+      - name: Fuzz smoke
+        run: cmake --build build-fuzz --target fuzz_smoke
+      - name: Upload artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: build-fuzz/fuzz-run/artifacts_*/
+          if-no-files-found: ignore
+
+  windows:
+    name: Windows MSVC
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Configure
+        run: cmake -S . -B build -A x64 -DCPKRT_BUILD_BENCHMARKS=ON
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure

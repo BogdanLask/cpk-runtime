@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: MIT
+build/
+build-*/
+cmake-build-*/
+out/
+install/
+compile_commands.json
+.cache/
+.vs/
+.vscode/
+*.user
+*.suo
+*.swp
+.DS_Store
+Testing/
+
+__pycache__/
+*.py[cod]
+
+# Fuzzing outputs
+fuzz-run/
+crash-*
+oom-*
+timeout-*
+slow-unit-*
+leak-*
+tests/corpus/seeds/sha1-*
