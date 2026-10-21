@@ -1,5 +1,7 @@
 # cpk-runtime
 
+[![ci](https://github.com/BogdanLask/cpk-runtime/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/BogdanLask/cpk-runtime/actions/workflows/ci.yml)
+
 `cpkrt` is a dependency-free C11 library for reading CRI CPK archives at
 runtime: index parsing, by-ID lookup, and CRILAYLA decoding. It is built to be
 linked into ports, emulators, and tools, not to be a CLI extractor. The library
