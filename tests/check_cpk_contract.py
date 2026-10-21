@@ -9,6 +9,18 @@ import tempfile
 
 TYPES = {'u16': (2, '>H'), 'u32': (4, '>I'), 's32': (5, '>i'), 'u64': (6, '>Q')}
 
+CPK_OK = 0
+CPK_IO = 1
+CPK_BAD_FORMAT = 3
+REASON = {
+    'NONE': 0, 'UTF_MAGIC': 1, 'UTF_VERSION': 2, 'UTF_LAYOUT': 3,
+    'TABLE_NAME': 4, 'COLUMN_FLAGS': 5, 'COLUMN_TYPE': 6, 'COLUMN_NAME': 7,
+    'ROW_LENGTH': 8, 'ROW_COUNT': 9, 'PACKET_TAG': 10, 'PACKET_SIZE': 11,
+    'MISSING_HEADER_COLUMN': 12, 'MISSING_TOC_COLUMN': 13, 'INTEGER': 14,
+    'ENTRY_RANGE': 15, 'DUPLICATE_ID': 16, 'MAP_MISMATCH': 17,
+    'FILES_MISMATCH': 18, 'LIMIT': 19, 'HEADER_VALUE': 20, 'IO': 21,
+}
+
 
 def utf(name, columns, rows):
     strings = bytearray()
@@ -146,6 +158,18 @@ def main():
             return result.stdout
         def index(data, command='index'):
             return [list(map(int, line.split())) for line in run(command, data).splitlines()]
+        def diagnose(data, max_version=None, io=False):
+            args = () if max_version is None else (str(max_version),)
+            output = run('diag_io' if io else 'diag', data, True, *args)
+            fields = {}
+            for line in output.decode().splitlines():
+                key, value = line.split('=', 1)
+                if value.startswith('[') and value.endswith(']'):
+                    value = value[1:-1]
+                fields[key] = value
+            for key in ('status', 'reason', 'index', 'offset', 'value', 'expected'):
+                fields[key] = int(fields[key])
+            return fields
         if case in ('toc', 'extended', 'encrypted'):
             data = archive('toc' if case == 'toc' else 'extended', case == 'encrypted')
             assert index(data) == [[2, 256, 2], [7, 1, 4352, 3, 3], [42, 0, 4096, 4, 4]]
@@ -202,6 +226,15 @@ def main():
             assert index(data) == [[2, 256, 2], [7, 1, 4352, 3, 3], [42, 0, 4096, 4, 4]]
             assert run('extract', data, True, '2a') == b'ABCD'
         elif case == 'lifecycle': run('lifecycle', archive())
+        elif case == 'version_gate':
+            data = archive(bad='version')
+            default = diagnose(data)
+            assert default['status'] == CPK_BAD_FORMAT
+            assert default['reason'] == REASON['UTF_VERSION']
+            assert default['table'] == 'CPK '
+            assert default['value'] == 1
+            accepted = diagnose(data, 1)
+            assert accepted['status'] == CPK_OK and accepted['reason'] == REASON['NONE']
         elif case == 'literals':
             for tail in (b'', b'A', bytes(range(256)), b'Literal\x00\xff\n\r stream'):
                 data = compressed([('literal', value) for value in tail[::-1]], len(tail))

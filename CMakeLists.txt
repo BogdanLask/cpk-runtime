@@ -107,9 +107,9 @@ if(CPKRT_BUILD_TESTS)
     cpkrt_warnings(cpkrt_probe)
     add_test(NAME crilayla_arguments COMMAND cpkrt_probe arguments)
 
-    foreach(case toc extended legacy encrypted bounds lifecycle literals references
-                 decode_errors provider_raw provider_packed provider_contracts
-                 files_errors fixture_cli)
+    foreach(case toc extended legacy encrypted bounds lifecycle version_gate
+                 literals references decode_errors provider_raw provider_packed
+                 provider_contracts files_errors fixture_cli)
         add_test(NAME cpk_${case}
                  COMMAND ${Python3_EXECUTABLE}
                          ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_cpk_contract.py

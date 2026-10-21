@@ -78,6 +78,46 @@ static bool parse_id(const char *s, uint32_t *id)
     return true;
 }
 
+static bool parse_version(const char *s, uint16_t *version)
+{
+    unsigned value = 0;
+    if (*s == '\0') return false;
+    for (; *s != '\0'; ++s) {
+        if (*s < '0' || *s > '9') return false;
+        value = value * 10u + (unsigned)(*s - '0');
+        if (value > UINT16_MAX) return false;
+    }
+    *version = (uint16_t)value;
+    return true;
+}
+
+/* Test-only adapter for the public diagnostic API. Always exits zero after
+ * printing, so the Python contract tests can assert on status and fields. */
+static int diagnose(FILE *f, uint64_t size, cpk_read_fn read, uint16_t max_version)
+{
+    cpk archive = {0};
+    cpk_diag diag = {0};
+    cpk_open_options options = {
+        .layout = CPK_LAYOUT_ID_ORDER,
+        .utf_max_version = max_version,
+        .diag = &diag,
+    };
+    cpk_status status = cpk_open_opts(&archive, read, f, size, &options);
+
+    printf("status=%d\n", (int)status);
+    printf("status_name=[%s]\n", cpk_status_name(status));
+    printf("reason=%d\n", diag.reason);
+    printf("reason_name=[%s]\n", cpk_reason_name(diag.reason));
+    printf("table=[%s]\n", diag.table ? diag.table : "-");
+    printf("column=[%s]\n", diag.column ? diag.column : "-");
+    printf("index=%" PRIu64 "\n", diag.index);
+    printf("offset=%" PRIu64 "\n", diag.offset);
+    printf("value=%" PRIu64 "\n", diag.value);
+    printf("expected=%" PRIu64 "\n", diag.expected);
+    cpk_close(&archive);
+    return 0;
+}
+
 static int emit(const uint8_t *in, size_t n, bool packed, size_t expected)
 {
     uint8_t *out = NULL;
@@ -157,6 +197,36 @@ static int arguments(void)
         return 1;
     cpk_close(NULL);
     if (cpk_find(NULL, 0) != NULL) return 1;
+    cpk_diag diagnostic = {
+        .reason = CPK_REASON_UTF_VERSION,
+        .table = "CPK ",
+        .column = "Version",
+        .index = 1,
+        .offset = 16,
+        .value = 1,
+        .expected = 0,
+    };
+    char tiny[4];
+    char text[256];
+    size_t needed = cpk_diag_format(&diagnostic, NULL, 0);
+    if (needed == 0 || cpk_diag_format(NULL, tiny, sizeof tiny) != 0 ||
+        cpk_diag_format(&diagnostic, NULL, sizeof tiny) != 0 ||
+        cpk_diag_format(&diagnostic, tiny, 0) != needed)
+        return 1;
+    memset(tiny, 0x55, sizeof tiny);
+    if (cpk_diag_format(&diagnostic, tiny, 1) != needed || tiny[0] != '\0') return 1;
+    memset(tiny, 0x55, sizeof tiny);
+    if (cpk_diag_format(&diagnostic, tiny, sizeof tiny) != needed ||
+        tiny[sizeof tiny - 1] != '\0')
+        return 1;
+    cpk_diag empty = {0};
+    if (cpk_diag_format(&empty, text, sizeof text) == 0 ||
+        strstr(text, "no diagnostic") == NULL ||
+        strcmp(cpk_reason_name(CPK_REASON_UTF_VERSION),
+               "unsupported @UTF version") != 0 ||
+        strcmp(cpk_reason_name(-1), "unknown") != 0 ||
+        strcmp(cpk_status_name(CPK_INVALID_ARG), "invalid argument") != 0)
+        return 1;
     if (cpk_asset_read(NULL, (cpk_asset_key){1, 0}, &blob).status != CPK_ASSET_INVALID ||
         cpk_asset_release(NULL, &blob))
         return 1;
@@ -531,6 +601,29 @@ int main(int argc, char **argv)
     if (f == NULL || !file_size(f, &size)) {
         if (f != NULL) fclose(f);
         return 1;
+    }
+    if (strcmp(argv[1], "diag") == 0) {
+        uint16_t max_version = 0;
+        if (argc != 3 && argc != 4) {
+            fclose(f);
+            return 2;
+        }
+        if (argc == 4 && !parse_version(argv[3], &max_version)) {
+            fclose(f);
+            return 2;
+        }
+        result = diagnose(f, size, read_at, max_version);
+        fclose(f);
+        return result;
+    }
+    if (strcmp(argv[1], "diag_io") == 0) {
+        if (argc != 3) {
+            fclose(f);
+            return 2;
+        }
+        result = diagnose(f, size, fail_read, 0);
+        fclose(f);
+        return result;
     }
     if (strcmp(argv[1], "provider_contracts") == 0) {
         result = provider_contracts(f, size);
