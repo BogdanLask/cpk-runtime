@@ -201,10 +201,9 @@ The bitstream is a sequence of tokens:
 - `0` + 8 bits: literal byte. Write it at the current end position.
 - `1` + 13 bits + length chunks: back-reference.
   - `distance = 13-bit value + 3`.
-  - `length = 3`, then add a 2-bit chunk. If that chunk is not all ones, stop.
-  - Otherwise add a 3-bit chunk, then a 5-bit chunk, then 8-bit chunks, stopping
-    at the first chunk that is not all ones. Each stage is skipped when its
-    chunk is the maximum value.
+  - `length = 3`, then add a 2-bit chunk, followed by a 3-bit chunk, a 5-bit
+    chunk, and then 8-bit chunks. Read the next chunk only while the current
+    chunk equals its maximum value; stop at the first chunk below its maximum.
   - Copy `length` bytes from `distance` bytes further towards the end of the
     output (already decoded data) to the current position.
 
