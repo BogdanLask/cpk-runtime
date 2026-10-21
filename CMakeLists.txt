@@ -28,6 +28,10 @@ endif()
 
 function(cpkrt_warnings target)
     if(MSVC)
+        # The tools use portable C stdio (fopen, strerror). MSVC flags these as
+        # deprecated in favor of the optional Annex K *_s variants; keep the
+        # portable calls, and keep the rest of /W4 /WX active.
+        target_compile_definitions(${target} PRIVATE _CRT_SECURE_NO_WARNINGS)
         target_compile_options(${target} PRIVATE /W4 /WX /permissive-)
     else()
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
