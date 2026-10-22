@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 cmake_minimum_required(VERSION 3.16)
-project(cpk-runtime VERSION 1.0.0
+project(cpk-runtime VERSION 1.1.0
         DESCRIPTION "Dependency-free C11 runtime reader for CRI CPK archives and CRILAYLA entries"
         LANGUAGES C)
 

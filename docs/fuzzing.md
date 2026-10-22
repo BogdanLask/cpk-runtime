@@ -4,11 +4,14 @@
 It is built only with Clang and is not part of the default build or CTest.
 
 ## Coverage and limits
-Each input is tried through `cpk_open_ex()` with both `CPK_LAYOUT_ID_ORDER` and
-`CPK_LAYOUT_TABLE_ORDER`. Successfully parsed entries are exercised with
-`cpk_find()` and `cpk_entry_compressed()`. The same bytes are also offered to
-`crilayla_output_size()` and `crilayla_decode()` when the declared output is at
-most 64 MiB.
+Each input is tried through `cpk_open_opts()` with both `CPK_LAYOUT_ID_ORDER`
+and `CPK_LAYOUT_TABLE_ORDER`, with `diag` both `NULL` and pointing at a
+`cpk_diag` (four variants), using the default `utf_max_version` of 0. A
+`CPK_BAD_FORMAT` result must record a nonzero reason, and the diagnostic is
+formatted through `cpk_diag_format()`. Successfully parsed entries are exercised
+with `cpk_find()` and `cpk_entry_compressed()`. The same bytes are also offered
+to `crilayla_output_size()` and `crilayla_decode()` when the declared output is
+at most 64 MiB.
 
 This covers the header, `@UTF` tables (including LCG-XOR obfuscation), TOC and
 extended/legacy ITOC paths, entry lookup, and the decoder. It does not cover

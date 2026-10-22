@@ -9,7 +9,10 @@ target, headers, and CMake package use the short name `cpkrt`.
 
 ## Features
 
-- CPK header and `@UTF` table parser, including optional LCG-XOR obfuscation.
+- CPK header and `@UTF` table parser, including optional LCG-XOR obfuscation
+  and an explicit, opt-in version ceiling.
+- First-failure diagnostics with stable reason codes and `snprintf`-style
+  formatting.
 - TOC (`CpkTocInfo`) with explicit IDs, plus the `CpkExtendId` ITOC map,
   validated against each other.
 - Legacy `DataH`/`DataL` ITOC with explicit layout selection.
@@ -23,7 +26,8 @@ target, headers, and CMake package use the short name `cpkrt`.
 - Synthetic fixtures only; the test suite needs no game data.
 
 I/O is an injected positional read callback, lookup is by numeric ID, and
-nothing is extracted to disk.
+nothing is extracted to disk. IDs are scoped to one archive; the same number in
+two archives is unrelated, and display names are never used as identity.
 
 ## Quick start
 
@@ -94,6 +98,72 @@ entries also need caller staging:
 offsets and sizes, and `crilayla_decode()` for compressed stored bytes. If you
 already have a mapping or platform handle, implement `cpk_read_fn` yourself.
 
+## Options, diagnostics, and version limits
+
+`cpk_open()` keeps the original behavior: ID-order layout and `@UTF` version 0
+only. Use `cpk_open_opts()` when you need another layout, an explicit version
+ceiling, or a reason for a rejected archive:
+
+```c
+cpk archive = {0};
+cpk_diag diag = {0};
+cpk_open_options options = {
+    .layout = CPK_LAYOUT_ID_ORDER,
+    .utf_max_version = 0, /* 0 accepts version 0 only */
+    .diag = &diag,
+};
+cpk_status status = cpk_open_opts(&archive, read, context, file_size, &options);
+if (status != CPK_OK) {
+    char text[256];
+    cpk_diag_format(&diag, text, sizeof text);
+    fprintf(stderr, "%s: %s\n", cpk_status_name(status), text);
+}
+```
+
+Zero-initialized options, or `NULL` options, behave like `cpk_open()`.
+`cpk_open_opts()` clears `*archive` and `*options->diag` on entry, so pass an
+uninitialized or closed archive struct, never one that is already open.
+`cpk_open_ex()` is the short form for a layout choice, and `cpk_open()` selects
+`CPK_LAYOUT_ID_ORDER`. All three return `CPK_INVALID_ARG` for NULL pointers or
+an out-of-range layout.
+
+The diagnostic captures the first failure only. `table` and `column` point to
+static literals (or `NULL`), so they remain valid after the archive is closed.
+`cpk_diag_format()` behaves like `snprintf`: it returns the full length needed
+and NUL-terminates when `n > 0`. `cpk_reason_name()` maps a reason code to a
+stable description.
+
+`utf_max_version` is a compatibility gate, not auto-detection. The default `0`
+accepts only version 0; setting it to `N` accepts versions `0..N` after the same
+structural checks. Versions above 0 are opt-in and have synthetic coverage only,
+so enable them only for archives you have checked. The provider forwards the
+same setting through `cpk_archive_source.utf_max_version` and its `diag` field.
+
+| Reason | Meaning |
+| --- | --- |
+| `CPK_REASON_NONE` | No failure was recorded. |
+| `CPK_REASON_UTF_MAGIC` | Missing or incorrect `@UTF` magic. |
+| `CPK_REASON_UTF_VERSION` | `@UTF` version exceeds the accepted ceiling. |
+| `CPK_REASON_UTF_LAYOUT` | Inconsistent `@UTF` offsets, size, or schema. |
+| `CPK_REASON_TABLE_NAME` | Invalid table-name offset or termination. |
+| `CPK_REASON_COLUMN_FLAGS` | Unsupported or invalid column flag bits. |
+| `CPK_REASON_COLUMN_TYPE` | Unknown column value type. |
+| `CPK_REASON_COLUMN_NAME` | Duplicate or unterminated column name. |
+| `CPK_REASON_ROW_LENGTH` | Per-row column sizes do not match the row length. |
+| `CPK_REASON_ROW_COUNT` | The header does not contain exactly one row. |
+| `CPK_REASON_PACKET_TAG` | A required packet tag is missing. |
+| `CPK_REASON_PACKET_SIZE` | Packet or table size is inconsistent. |
+| `CPK_REASON_MISSING_HEADER_COLUMN` | A required header column is absent. |
+| `CPK_REASON_MISSING_TOC_COLUMN` | A required TOC or ITOC column is absent. |
+| `CPK_REASON_INTEGER` | An integer is negative or overflows its destination. |
+| `CPK_REASON_ENTRY_RANGE` | An entry or table range lies outside the file. |
+| `CPK_REASON_DUPLICATE_ID` | Two index rows share one numeric ID. |
+| `CPK_REASON_MAP_MISMATCH` | IDs and `TocIndex` values do not form a valid map. |
+| `CPK_REASON_FILES_MISMATCH` | Header `Files` disagrees with the parsed index. |
+| `CPK_REASON_LIMIT` | A host-side size or entry budget was exceeded. |
+| `CPK_REASON_HEADER_VALUE` | A header value is invalid or unsupported. |
+| `CPK_REASON_IO` | The positional read callback failed. |
+
 ## Building
 
 Requirements: CMake 3.16+ and a C11 compiler. Python 3 is only needed for the
@@ -146,7 +216,7 @@ memory; see [bench/README.md](bench/README.md) for options and caveats.
 
 | Header | Contents |
 | --- | --- |
-| `cpkrt/cpk.h` | `cpk_open()` / `cpk_open_ex()`, `cpk_find()`, `cpk_close()`, `cpk_entry`, `cpk_status`. |
+| `cpkrt/cpk.h` | `cpk_open()` / `cpk_open_ex()` / `cpk_open_opts()`, `cpk_find()`, `cpk_close()`, `cpk_entry`, `cpk_status`, `cpk_open_options`, `cpk_diag`, `cpk_diag_format()`, `cpk_reason_name()`. |
 | `cpkrt/crilayla.h` | `crilayla_detect()`, `crilayla_output_size()`, `crilayla_decode()`, `crilayla_status`. |
 | `cpkrt/asset.h` | `cpk_asset_key`, `cpk_asset_blob`, `cpk_asset_buffer`, `cpk_asset_provider`, `cpk_asset_read()`, `cpk_asset_read_into()`, `cpk_asset_release()`. |
 | `cpkrt/cpk_assets.h` | `cpk_archive_source`, `cpk_allocator`, `cpk_assets_open()`, `cpk_assets_open_ex()`, `cpk_assets_provider()`, `cpk_assets_close()`, per-entry caps. |
@@ -159,16 +229,18 @@ provider caps stored and decoded entries at 64 MiB by default
 close while a lease is outstanding. Fills take no lease and need no release;
 `CPK_ASSET_BUFFER_TOO_SMALL` reports the exact retry sizes and reads no payload.
 The optional `cpk_allocator` hooks cover the provider's own structures and read
-buffers; index parsing inside `cpk_open_ex()` always uses the C library.
+buffers; index parsing inside `cpk_open_opts()` always uses the C library.
 
 ## Validation
 
-Before this de-branded release, the parser and decoder were validated against
+Before the initial 1.0.0 release, the parser and decoder were validated against
 four archives from one shipped title: **20,908 index entries**, ~2.1 GiB total,
 with **31 assets byte-compared** through the public read/decode path (27
 CRILAYLA-decoded and 4 raw). The title is intentionally unnamed; the archives
 are not part of this repository and are not needed to build or test it. The
 provider also served as the default asset backend in a Windows application.
+The 1.1.0 diagnostics and version gate are covered by synthetic fixtures and
+sanitizers; they were not part of that original real-archive comparison.
 
 Fuzzing: a libFuzzer harness covers the parser and decoder. The checked-in seed
 corpus is synthetic, and CI runs a short `fuzz_smoke`; local commands, corpus
@@ -178,9 +250,11 @@ growth, and crash triage are in [docs/fuzzing.md](docs/fuzzing.md).
 
 - Only the observed TOC + `CpkExtendId` ITOC variant is confirmed on real
   files; the legacy `DataH`/`DataL` path is covered by synthetic tests only.
-- `@UTF` version 0 is accepted and LCG-XOR table obfuscation is implemented,
-  both synthetically tested. Unsupported versions and variants are rejected
-  rather than guessed; the obfuscation was not in the real validation set.
+- `@UTF` version 0 is accepted by default. Higher versions must be enabled with
+  `utf_max_version` and are parsed with the same structural checks; only version
+  0 was observed in the real validation set, so higher versions and LCG-XOR
+  table obfuscation have synthetic coverage only. Unsupported versions and
+  variants are rejected rather than guessed.
 - ETOC/GTOC tables, archive-level encryption, and CRILAYLA compression are not
   implemented.
 - Entry names are not exposed. Some archives store only placeholder names,
@@ -189,8 +263,8 @@ growth, and crash triage are in [docs/fuzzing.md](docs/fuzzing.md).
 - The provider is synchronous and nonconcurrent, not a streaming or async
   loader.
 - The probe is a test adapter, not a supported extraction CLI.
-- Linux GCC is the toolchain verified for this release. Clang and MSVC are
-  configured in CI.
+- Linux GCC is verified locally for this release. CI also builds and tests with
+  Clang and MSVC (warnings as errors) and runs the Clang `fuzz_smoke` target.
 
 Format details, including header, `@UTF`, TOC/ITOC, and CRILAYLA layouts, are in
 [docs/format.md](docs/format.md).

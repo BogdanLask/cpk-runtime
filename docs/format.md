@@ -13,8 +13,9 @@ validate.
   relative.
 - An archive has a `ContentOffset` (start of the payload area), an alignment
   value, and an index made of a TOC and/or an ITOC.
-- Entry identity is the numeric ID in the index. Names are not part of the
-  stable identity model used here.
+- Entry identity is the numeric ID in the index. IDs are local to one archive
+  and are never derived from filenames; names are display metadata, not stable
+  identity.
 
 ## 2. Packet framing
 
@@ -58,7 +59,7 @@ An `@UTF` table begins with:
 | --- | --- | --- |
 | 0 | 4 | Magic `@UTF` |
 | 4 | 4 | Table size in bytes, excluding the magic |
-| 8 | 2 | Version (0 in observed files) |
+| 8 | 2 | Version (0 by default; see the version gate below) |
 | 10 | 2 | Rows offset, relative to byte 8 |
 | 12 | 4 | String-pool offset, relative to byte 8 |
 | 16 | 4 | Data-area offset, relative to byte 8 |
@@ -70,6 +71,16 @@ An `@UTF` table begins with:
 The total table size is `table_size + 8`. Offsets must be ordered
 `rows <= strings <= data <= total`, and the row array must fit before the
 string pool.
+
+### Version gate
+
+The reader accepts version 0 by default. `cpk_open_options.utf_max_version`
+raises the ceiling: setting it to `N` accepts versions `0..N`, all parsed with
+the same table layout and structural checks. This is an explicit compatibility
+gate, not auto-detection or a claim that higher versions are fully specified;
+only version 0 was observed in the real validation set. The version check runs
+before the column schema is parsed and reports `CPK_REASON_UTF_VERSION` with the
+observed version in `value` and the accepted ceiling in `expected`.
 
 ### Column schema
 
@@ -177,7 +188,9 @@ parser but has only synthetic coverage in this repository.
 The payload area starts at `ContentOffset`, rounded up to `Align`. The header's
 `Align` must be nonzero. ID values are local to one archive; the same number in
 two archives is unrelated. Display names may be placeholders, duplicated, or
-absent, so applications should use IDs for lookup and caching keys.
+absent, so applications should use the pair of archive identifier and numeric
+ID for lookup and caching keys. The library exposes no filename or path
+recovery; `table_order` is diagnostic metadata, not identity.
 
 ## 9. CRILAYLA
 
@@ -231,11 +244,48 @@ Host-side limits in this implementation, not format limits:
 - 64 MiB default cap for stored and decoded provider entries, applied to lease
   reads and to caller-buffer fills alike; configurable per source.
 
+The default `@UTF` version ceiling is 0. Higher ceilings are an explicit
+per-open policy, not an inferred format limit.
+
 Not implemented: ETOC/GTOC, archive-level encryption, CPK writing/repacking,
 CRILAYLA compression, filename recovery, and asynchronous loading. The parser
 is integer-only and does not depend on floating-point behavior.
 
-## 11. References
+## 11. Diagnostics
+
+`cpk_open_opts()` can fill a caller-owned `cpk_diag` with the first failure.
+The fields are:
+
+- `reason`: one of the `CPK_REASON_*` values.
+- `table`: the packet or subtable being parsed, or `NULL`.
+- `column`: the relevant column name, or `NULL` when no single name applies.
+- `index`: row or column index, when relevant.
+- `offset`: file offset of the packet or table, when known.
+- `value` and `expected`: the observed value and the limit or expected value.
+
+`table` and `column` point to static literals and never need freeing. Parsing
+stops at the first failure, so later inconsistencies are not reported.
+`cpk_reason_name()` returns a stable description, and `cpk_diag_format()`
+produces a single line with `snprintf` return semantics. The reason codes cover:
+
+- Packet framing: `CPK_REASON_PACKET_TAG`, `CPK_REASON_PACKET_SIZE`.
+- `@UTF` structure: `CPK_REASON_UTF_MAGIC`, `CPK_REASON_UTF_VERSION`,
+  `CPK_REASON_UTF_LAYOUT`, `CPK_REASON_TABLE_NAME`,
+  `CPK_REASON_COLUMN_FLAGS`, `CPK_REASON_COLUMN_TYPE`,
+  `CPK_REASON_COLUMN_NAME`, `CPK_REASON_ROW_LENGTH`,
+  `CPK_REASON_ROW_COUNT`.
+- Required fields and header values: `CPK_REASON_MISSING_HEADER_COLUMN`,
+  `CPK_REASON_MISSING_TOC_COLUMN`, `CPK_REASON_HEADER_VALUE`,
+  `CPK_REASON_FILES_MISMATCH`.
+- Entry values and relationships: `CPK_REASON_INTEGER`,
+  `CPK_REASON_ENTRY_RANGE`, `CPK_REASON_DUPLICATE_ID`,
+  `CPK_REASON_MAP_MISMATCH`, `CPK_REASON_LIMIT`.
+- Host I/O: `CPK_REASON_IO`.
+
+`CPK_REASON_NONE` means no failure was recorded. The README has a
+one-line description of every reason code.
+
+## 12. References
 
 - [CriPakTools](https://github.com/esperknight/CriPakTools)
 - [QuickBMS](https://aluigi.altervista.org/quickbms.htm)

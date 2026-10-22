@@ -27,7 +27,7 @@ typedef struct {
  * buffers. Both must be nonnull together; alloc is never called with 0;
  * free must accept NULL; the same context must outlive the provider and
  * every lease. NULL selects the C library malloc/free. Index allocations
- * inside cpk_open_ex() are not covered. */
+ * inside cpk_open_opts() are not covered. */
 typedef struct {
     void *context;
     void *(*alloc)(void *, size_t);
