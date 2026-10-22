@@ -28,16 +28,27 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 
     memory_file file = {data, size};
     cpk archive = {0};
-    for (int layout = 0; layout < 2; layout++) {
-        cpk_status status = cpk_open_ex(&archive, memory_read, &file, size,
-                                        layout ? CPK_LAYOUT_TABLE_ORDER
-                                               : CPK_LAYOUT_ID_ORDER);
+    for (int variant = 0; variant < 4; variant++) {
+        cpk_diag diag = {0};
+        bool use_diag = (variant & 2) != 0;
+        cpk_open_options options = {
+            .layout = (variant & 1) ? CPK_LAYOUT_TABLE_ORDER : CPK_LAYOUT_ID_ORDER,
+            .utf_max_version = 0,
+            .diag = use_diag ? &diag : NULL,
+        };
+        cpk_status status = cpk_open_opts(&archive, memory_read, &file, size, &options);
+        if (status == CPK_BAD_FORMAT && use_diag && diag.reason == CPK_REASON_NONE)
+            abort();
         if (status == CPK_OK) {
             for (size_t i = 0; i < archive.count; i++) {
                 const cpk_entry *entry = &archive.entries[i];
                 (void)cpk_find(&archive, entry->id);
                 (void)cpk_entry_compressed(entry);
             }
+        }
+        if (use_diag) {
+            char text[32];
+            (void)cpk_diag_format(&diag, text, sizeof text);
         }
         cpk_close(&archive);
     }

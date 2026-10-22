@@ -226,8 +226,10 @@ static cpk_status utf_open(open_state *s, utf_table *t, uint8_t *buf, size_t siz
                 size_t k = 0;
                 while (a[k] && b[k] && lower(a[k]) == lower(b[k])) k++;
                 if (!a[k] && !b[k]) {
+                    /* a points into the packet buffer, which is freed before
+                     * the caller reads the diagnostic; report the index only. */
                     (void)fail(s, CPK_BAD_FORMAT, CPK_REASON_COLUMN_NAME, table,
-                               (const char *)a, i, offset, j, 0);
+                               NULL, i, offset, j, 0);
                     goto bad;
                 }
             }

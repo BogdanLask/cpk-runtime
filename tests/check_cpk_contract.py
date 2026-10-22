@@ -99,19 +99,29 @@ def archive(mode='extended', encrypted=False, bad=None, payload=None, extract_si
     if bad == 'count': header['Files'] = 3
     if bad == 'align': header['Align'] = 0
     if bad == 'extent': header['TocSize'] = 24
-    hdr = utf('CpkHeader', [(key, 'u64') for key in header], [header])
-    if bad in ('version', 'schema', 'rows', 'strings'):
+    header_cols = [(key, 'u64') for key in header]
+    if bad == 'no_content':
+        header_cols = [column for column in header_cols if column[0] != 'ContentOffset']
+    header_rows = [header, dict(header)] if bad == 'header_rows' else [header]
+    hdr = utf('CpkHeader', header_cols, header_rows)
+    if bad in ('version', 'schema', 'rows', 'strings', 'utf_magic',
+               'column_flags', 'column_type'):
         hdr = bytearray(hdr)
         if bad == 'version': struct.pack_into('>H', hdr, 8, 1)
         elif bad == 'schema': struct.pack_into('>H', hdr, 10, 1)
         elif bad == 'rows': struct.pack_into('>I', hdr, 28, 2)
-        else: struct.pack_into('>I', hdr, 20, 0xffffffff)
+        elif bad == 'strings': struct.pack_into('>I', hdr, 20, 0xffffffff)
+        elif bad == 'utf_magic': hdr[0:4] = b'XXXX'
+        elif bad == 'column_flags': hdr[32] = 0x00
+        else: hdr[32] = 0x59  # 0x50 | unknown type 9
     buf = bytearray(content+(0x2000 if payload is not None else 0x200))
     for at, tag, data in [(0, b'CPK ', hdr), (toc_at, b'TOC ', toc), (itoc_at, b'ITOC', itoc)]:
         p = packet(tag, data, encrypted)
         assert at + len(p) <= content
         buf[at:at+len(p)] = p
     if bad == 'packet_size': struct.pack_into('<Q', buf, toc_at+8, 0xffffffffffffffff)
+    if bad == 'packet_tag': buf[toc_at:toc_at+4] = b'XXXX'
+    if bad == 'table_limit': struct.pack_into('>I', buf, 20, 0x00ffffff)
     buf[content:content+4] = b'ABCD'
     second = content+(0x1000 if payload is not None else 0x100)
     buf[second:second+3] = b'xyz'
@@ -235,6 +245,47 @@ def main():
             assert default['value'] == 1
             accepted = diagnose(data, 1)
             assert accepted['status'] == CPK_OK and accepted['reason'] == REASON['NONE']
+        elif case == 'diagnostics':
+            cases = [
+                ('utf_magic', 'UTF_MAGIC', 'CPK ', '-'),
+                ('version', 'UTF_VERSION', 'CPK ', '-'),
+                ('schema', 'UTF_LAYOUT', 'CPK ', '-'),
+                ('strings', 'TABLE_NAME', 'CPK ', '-'),
+                ('column_flags', 'COLUMN_FLAGS', 'CPK ', '-'),
+                ('column_type', 'COLUMN_TYPE', 'CPK ', '-'),
+                ('duplicate_column', 'COLUMN_NAME', 'TOC ', '-'),
+                ('rows', 'ROW_LENGTH', 'CPK ', '-'),
+                ('header_rows', 'ROW_COUNT', 'CPK ', '-'),
+                ('packet_tag', 'PACKET_TAG', 'TOC ', '-'),
+                ('packet_size', 'PACKET_SIZE', 'TOC ', '-'),
+                ('no_content', 'MISSING_HEADER_COLUMN', 'CPK ', 'ContentOffset'),
+                ('no_id', 'MISSING_TOC_COLUMN', 'TOC ', 'ID'),
+                ('map_negative', 'INTEGER', 'ITOC', 'TocIndex'),
+                ('offset_overflow', 'INTEGER', 'TOC ', 'FileOffset'),
+                ('range', 'ENTRY_RANGE', 'TOC ', 'FileOffset'),
+                ('duplicate_id', 'DUPLICATE_ID', 'TOC ', 'ID'),
+                ('map_index', 'MAP_MISMATCH', 'ITOC', 'TocIndex'),
+                ('map_short', 'MAP_MISMATCH', 'ITOC', '-'),
+                ('map_id', 'MAP_MISMATCH', 'ITOC', 'TocIndex'),
+                ('map_duplicate', 'MAP_MISMATCH', 'ITOC', 'TocIndex'),
+                ('count', 'FILES_MISMATCH', 'CPK ', 'Files'),
+                ('table_limit', 'LIMIT', 'CPK ', '-'),
+                ('align', 'HEADER_VALUE', 'CPK ', 'Align'),
+                ('extent', 'PACKET_SIZE', 'TOC ', '-'),
+            ]
+            for bad, reason, table, column in cases:
+                data = archive(bad=bad)
+                result = diagnose(data)
+                assert result['status'] == CPK_BAD_FORMAT, (bad, result)
+                assert result['reason'] == REASON[reason], (bad, result)
+                assert result['table'] == table, (bad, result)
+                assert result['column'] == column, (bad, result)
+                run('index', data, False)  # NULL diag must not change the status
+            io = diagnose(archive(), io=True)
+            assert io['status'] == CPK_IO and io['reason'] == REASON['IO']
+            assert io['table'] == 'CPK ' and io['offset'] == 0
+            valid = diagnose(archive())
+            assert valid['status'] == CPK_OK and valid['reason'] == REASON['NONE']
         elif case == 'literals':
             for tail in (b'', b'A', bytes(range(256)), b'Literal\x00\xff\n\r stream'):
                 data = compressed([('literal', value) for value in tail[::-1]], len(tail))
