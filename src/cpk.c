@@ -516,7 +516,7 @@ static cpk_status load_itoc_part(open_state *s, const utf_table *t, const char *
     cpk_status st = utf_open(s, &sub, blob, blen, name, 0);
     if (st != CPK_OK) return st;
 
-    const utf_col *id, *size, *extract;
+    const utf_col *id = NULL, *size = NULL, *extract = NULL;
     if (!require_col(s, &sub, name, 0, "ID", CPK_REASON_MISSING_TOC_COLUMN, &id) ||
         !require_col(s, &sub, name, 0, "FileSize", CPK_REASON_MISSING_TOC_COLUMN, &size))
         st = CPK_BAD_FORMAT;
@@ -611,7 +611,7 @@ static cpk_status load_toc(open_state *s, uint64_t offset, uint64_t extent, uint
     }
 
     uint64_t table_offset = offset + 16;
-    const utf_col *foff, *size, *id;
+    const utf_col *foff = NULL, *size = NULL, *id = NULL;
     const utf_col *extract = utf_find_col(&t, "ExtractSize");
     if (!require_col(s, &t, "TOC ", table_offset, "FileOffset",
                      CPK_REASON_MISSING_TOC_COLUMN, &foff) ||
@@ -669,7 +669,7 @@ static cpk_status validate_map(open_state *s,uint64_t offset,uint64_t extent,con
     status=utf_open(s,&table,buf,size,"ITOC",offset+16);
     if(status!=CPK_OK) {free(buf);return status;}
     uint64_t table_offset = offset + 16;
-    const utf_col *id, *index;
+    const utf_col *id = NULL, *index = NULL;
     if (!require_col(s, &table, "ITOC", table_offset, "ID",
                      CPK_REASON_MISSING_TOC_COLUMN, &id) ||
         !require_col(s, &table, "ITOC", table_offset, "TocIndex",
